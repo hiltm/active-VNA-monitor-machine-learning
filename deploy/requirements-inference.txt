@@ -1,0 +1,16 @@
+# pinned dependencies for running classify_measurement.py inference.
+# versions must match the environment the model was trained/pickled in,
+# otherwise joblib.load() may warn or fail to unpickle the sklearn model.
+#
+# install with:
+#   python3 -m venv .venv
+#   source .venv/bin/activate
+#   pip install -r requirements-inference.txt
+#
+# on 64-bit Raspberry Pi OS (aarch64), piwheels/PyPI provide prebuilt
+# wheels for all of these, so no compilation is required.
+
+scikit-learn==1.5.1
+numpy==1.26.4
+scipy==1.17.1
+joblib==1.5.3
