@@ -1,0 +1,32 @@
+# --- data and generated artifacts ---
+data/
+models/
+results/
+*.npz
+*.joblib
+*.mat
+
+# generated figures
+*.fig
+*.pdf
+*.png
+*.svg
+
+# deployment bundles
+chiptamper_pi_bundle/
+*.tar.gz
+
+# --- python environment ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# --- os / editor cruft ---
+.DS_Store
+*.swp
+.vscode/
+.idea/
