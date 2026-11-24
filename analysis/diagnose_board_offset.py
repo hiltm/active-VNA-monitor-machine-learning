@@ -21,9 +21,8 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RESULTS_DIR = os.path.join(BASE_DIR, 'results')
-MODEL_DIR = os.path.join(BASE_DIR, 'models')
+RESULTS_DIR = dc.RESULTS_DIR                       # honors CHIPTAMPER_OUTPUT_DIR
+MODEL_DIR = os.path.join(dc.OUTPUT_ROOT, 'models')
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 DUTS = ['SN004', 'SN005']

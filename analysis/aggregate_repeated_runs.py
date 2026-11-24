@@ -5,7 +5,9 @@ for accuracy, balanced accuracy, and macro-F1. Writes results/repeated_runs_summ
 import os, sys, json
 import numpy as np
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# outputs live under CHIPTAMPER_OUTPUT_DIR (defaults to repo root)
+BASE = os.environ.get('CHIPTAMPER_OUTPUT_DIR',
+                      os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CKPT = os.path.join(BASE, 'results', 'repeated_runs.json')
 OUT = os.path.join(BASE, 'results', 'repeated_runs_summary.md')
 

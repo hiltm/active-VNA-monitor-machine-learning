@@ -10,7 +10,7 @@ for _d in ('src', 'viz', 'experiments'):
     sys.path.insert(0, os.path.join(_ROOT, _d))
 import train_classifier as tc
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
+DATA_DIR = tc.DATA_ROOT   # honors CHIPTAMPER_DATA_DIR
 
 
 def main():

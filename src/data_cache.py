@@ -30,9 +30,12 @@ for _d in ('src', 'viz', 'experiments'):
     sys.path.insert(0, os.path.join(_ROOT, _d))
 import train_classifier as tc
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-CACHE_DIR = os.path.join(BASE_DIR, 'models', 'cache')
+# resolve data/output through train_classifier so the env-var overrides
+# (CHIPTAMPER_DATA_DIR / CHIPTAMPER_OUTPUT_DIR) apply everywhere, single source of truth
+DATA_DIR = tc.DATA_ROOT
+OUTPUT_ROOT = tc.OUTPUT_ROOT
+CACHE_DIR = os.path.join(OUTPUT_ROOT, 'models', 'cache')
+RESULTS_DIR = os.path.join(OUTPUT_ROOT, 'results')
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 

@@ -7,7 +7,9 @@ Writes results/lobo4_summary.md.
 import os, json
 import numpy as np
 
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# outputs live under CHIPTAMPER_OUTPUT_DIR (defaults to repo root)
+BASE = os.environ.get('CHIPTAMPER_OUTPUT_DIR',
+                      os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CKPT = os.path.join(BASE, 'results', 'lobo_baseline_relative.json')
 OUT = os.path.join(BASE, 'results', 'lobo4_summary.md')
 

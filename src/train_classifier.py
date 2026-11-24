@@ -68,6 +68,22 @@ except ImportError:
 
 
 # =============================================================================
+# PATH ROOTS
+# =============================================================================
+# data is read from DATA_ROOT, outputs (models/cache/results/figures) are written
+# under OUTPUT_ROOT. both default to the repo root but can be redirected with env
+# vars so the input data and the generated artifacts live outside the code repo:
+#   CHIPTAMPER_DATA_DIR    -> where the SN0xx data folders live
+#   CHIPTAMPER_OUTPUT_DIR  -> where models/, results/, cache/ are written
+# every other module resolves paths through these two names (single source of truth)
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_ROOT = os.environ.get('CHIPTAMPER_DATA_DIR',
+                           os.path.join(_REPO_ROOT, 'data'))
+OUTPUT_ROOT = os.environ.get('CHIPTAMPER_OUTPUT_DIR', _REPO_ROOT)
+
+
+# =============================================================================
 # CONFIGURATION
 # =============================================================================
 
@@ -121,6 +137,63 @@ DATA_CONFIG = {
             '20260729': 5,   # Day 5
             '20260730': 6,   # Day 6
             '20260731': 7,   # Day 7
+        },
+        'baseline_folder': 'baseline',
+    },
+    'SN008': {
+        'run': 35,
+        'dates': {
+            '20261017': 0,   # Day 0 - baseline
+            '20261018': 1,   # Day 1
+            '20261019': 2,   # Day 2
+            '20261020': 3,   # Day 3
+            '20261021': 4,   # Day 4
+            '20261022': 5,   # Day 5
+            '20261023': 6,   # Day 6
+            '20261024': 7,   # Day 7
+        },
+        'baseline_folder': 'baseline',
+    },
+    'SN009': {
+        'run': 36,
+        'dates': {
+            '20261024': 0,   # Day 0 - baseline (spills into 20261025)
+            '20261025': 1,   # Day 1
+            '20261026': 2,   # Day 2
+            '20261027': 3,   # Day 3
+            '20261028': 4,   # Day 4
+            '20261029': 5,   # Day 5
+            '20261030': 6,   # Day 6
+            '20261031': 7,   # Day 7
+            '20261102': 8,   # Day 8 - note 20261101 gap in capture
+        },
+        'baseline_folder': 'baseline',
+    },
+    'SN010': {
+        'run': 37,
+        'dates': {
+            '20261103': 0,   # Day 0 - baseline
+            '20261104': 1,   # Day 1
+            '20261105': 2,   # Day 2
+            '20261106': 3,   # Day 3
+            '20261107': 4,   # Day 4
+            '20261108': 5,   # Day 5
+            '20261109': 6,   # Day 6
+        },
+        'baseline_folder': 'baseline',
+    },
+    'SN011': {
+        'run': 38,
+        'dates': {
+            '20261109': 0,   # Day 0 - baseline (spills into 20261110)
+            '20261110': 1,   # Day 1
+            '20261111': 2,   # Day 2
+            '20261112': 3,   # Day 3
+            '20261113': 4,   # Day 4
+            '20261114': 5,   # Day 5
+            '20261115': 6,   # Day 6
+            '20261116': 7,   # Day 7
+            '20261117': 8,   # Day 8
         },
         'baseline_folder': 'baseline',
     },
@@ -943,8 +1016,9 @@ examples:
     )
     
     parser.add_argument('--data-dir', type=str,
-                        default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data'),
-                        help='Root directory containing SN004/SN005 data folders')
+                        default=DATA_ROOT,
+                        help='Root directory containing SN0xx data folders '
+                             '(default: $CHIPTAMPER_DATA_DIR or <repo>/data)')
     parser.add_argument('--sample-rate', type=int, default=100,
                         help='Subsampling rate: keep 1 in N files (default: 100)')
     parser.add_argument('--model', type=str, default='knn',
@@ -955,8 +1029,9 @@ examples:
     parser.add_argument('--no-discard', action='store_true',
                         help='Disable 5-minute initial discard window')
     parser.add_argument('--output-dir', type=str,
-                        default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models'),
-                        help='Directory to save trained models and results')
+                        default=os.path.join(OUTPUT_ROOT, 'models'),
+                        help='Directory to save trained models and results '
+                             '(default: $CHIPTAMPER_OUTPUT_DIR/models or <repo>/models)')
     parser.add_argument('--test-size', type=float, default=0.2,
                         help='Fraction of data for testing (default: 0.2)')
     parser.add_argument('--knn-neighbors', type=int, default=5,
