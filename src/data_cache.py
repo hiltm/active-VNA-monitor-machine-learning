@@ -70,7 +70,13 @@ def _day_for_file(filepath, dut):
 
 
 def build_dut_cache(dut, rebuild=False, atomic=True):
-    """extract features for one DUT and cache to disk. returns (X, y, day)"""
+    """extract features for one DUT and cache to disk. returns (X, y, day)
+
+    the cache also stores an 'hours' array (accumulated aging hours per sweep,
+    relative to the board's earliest kept sweep). hours are captured in the
+    SAME pass that builds X/y/day and share the same skip of unparseable files,
+    so they are guaranteed row-aligned with X (see load_hours)
+    """
     path = _cache_path(dut)
     if os.path.isfile(path) and not rebuild:
         data = np.load(path, allow_pickle=True)
@@ -81,7 +87,7 @@ def build_dut_cache(dut, rebuild=False, atomic=True):
     if not pairs:
         raise RuntimeError(f"No files discovered for {dut}")
 
-    X_list, y_list, day_list = [], [], []
+    X_list, y_list, day_list, ts_list = [], [], [], []
     total = len(pairs)
     for i, (fp, label) in enumerate(pairs):
         if (i + 1) % 2000 == 0 or (i + 1) == total:
@@ -93,11 +99,21 @@ def build_dut_cache(dut, rebuild=False, atomic=True):
         X_list.append(feats.astype(np.float32))
         y_list.append(label)
         day_list.append(_day_for_file(fp, dut))
+        ts_list.append(tc.parse_timestamp_from_filename(fp))   # may be None
     print()
 
     X = np.asarray(X_list, dtype=np.float32)
     y = np.asarray(y_list, dtype=np.int64)
     day = np.asarray(day_list, dtype=np.int64)
+
+    # accumulated aging hours per kept sweep, relative to the board's earliest
+    # valid timestamp; files with an unparseable timestamp become NaN
+    valid_ts = [t for t in ts_list if t is not None]
+    t0 = min(valid_ts) if valid_ts else None
+    hours = np.array(
+        [((t - t0).total_seconds() / 3600.0) if (t is not None and t0 is not None)
+         else np.nan for t in ts_list],
+        dtype=np.float64)
 
     # atomic write: temp file + rename, so an interrupted write can't corrupt cache
     # NOTE: np.savez_compressed appends '.npz' to the given path if not present,
@@ -105,10 +121,10 @@ def build_dut_cache(dut, rebuild=False, atomic=True):
     if atomic:
         tmp_base = path + '.tmp'          # np will write tmp_base + '.npz'
         tmp_written = tmp_base + '.npz'
-        np.savez_compressed(tmp_base, X=X, y=y, day=day, dut=dut)
+        np.savez_compressed(tmp_base, X=X, y=y, day=day, hours=hours, dut=dut)
         os.replace(tmp_written, path)
     else:
-        np.savez_compressed(path, X=X, y=y, day=day, dut=dut)
+        np.savez_compressed(path, X=X, y=y, day=day, hours=hours, dut=dut)
 
     print(f"[cache] {dut}: {X.shape[0]} samples x {X.shape[1]} features -> {path}")
     return X, y, day
@@ -117,6 +133,23 @@ def build_dut_cache(dut, rebuild=False, atomic=True):
 def load_dut(dut, rebuild=False):
     """load cached features for a DUT (building the cache if needed)"""
     return build_dut_cache(dut, rebuild=rebuild)
+
+
+def load_hours(dut):
+    """load the per-sweep aging-hours array for a DUT (row-aligned with load_dut)
+
+    requires a cache built after the 'hours' field was added; raises if the
+    field is missing so a stale cache is caught rather than silently misused
+    """
+    path = _cache_path(dut)
+    if not os.path.isfile(path):
+        build_dut_cache(dut)
+    data = np.load(path, allow_pickle=True)
+    if 'hours' not in data:
+        raise RuntimeError(
+            f"{dut} cache has no 'hours' field; rebuild with "
+            f"'python src/data_cache.py --rebuild'")
+    return data['hours']
 
 
 def main():
