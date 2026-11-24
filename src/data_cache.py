@@ -51,12 +51,21 @@ def _cache_path(dut):
 
 
 def _day_for_file(filepath, dut):
-    """recover the aging-day number for a file from its path, using DATA_CONFIG"""
+    """recover the aging-day number for a file from its path, using DATA_CONFIG
+
+    keys on the '<run>_<YYYYMMDD>' capture-session folder, NOT the filename
+    timestamp. a capture session can span midnight, so day-N files sometimes
+    carry a day-(N-1) timestamp in their name (observed on SN010); matching the
+    folder avoids that collision
+    """
     cfg = tc.DATA_CONFIG[dut]
-    for date_str, day in cfg['dates'].items():
-        if os.sep + date_str in filepath or filepath.endswith(date_str) or \
-           (f"_{date_str}") in filepath:
-            return day
+    run_prefix = f"{cfg['run']}_"
+    # walk the path components looking for the '<run>_<YYYYMMDD>' session folder
+    for part in filepath.split(os.sep):
+        if part.startswith(run_prefix):
+            date_str = part[len(run_prefix):]
+            if date_str in cfg['dates']:
+                return cfg['dates'][date_str]
     return -1
 
 
