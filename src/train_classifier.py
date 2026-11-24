@@ -288,19 +288,26 @@ def get_frequency_axis():
 
 
 def parse_s2p_file(filepath):
-    """parse a .s2p file and extract S11 and S21 (from S12 columns) data
-    
-    returns:
-        freqs: numpy array of frequency points (Hz)
-        s11_complex: numpy array of complex S11 values
-        s21_complex: numpy array of complex S21 values (read from S12 columns)
-    returns (None, None, None) if parsing fails
+    """parse a .s2p file and extract S11 and the transmission response
+
+    column layout is 'freq ReS11 ImS11 ReS21 ImS21 ReS12 ImS12 ReS22 ImS22'.
+    the transmission data location changed between capture campaigns:
+      - older files (SN004-SN007): a logging quirk wrote transmission into the
+        S12 columns (parts[5],[6]); the S21 columns (parts[3],[4]) are zeros
+      - newer files (SN008+): transmission is in the correct S21 columns
+        (parts[3],[4]); the S12 columns are zeros
+    we read BOTH pairs and pick whichever actually carries data, so either
+    format parses correctly. reading the hard-coded S12 columns on a newer file
+    silently yields all-zeros -> -200 dB features and destroys the aging signal
+
+    returns (freqs, s11_complex, s21_complex) or (None, None, None) on failure
     """
     try:
         freqs = []
         s11_re, s11_im = [], []
-        s21_re, s21_im = [], []
-        
+        s21col_re, s21col_im = [], []   # parts[3],[4] : labeled-S21 columns
+        s12col_re, s12col_im = [], []   # parts[5],[6] : labeled-S12 columns
+
         with open(filepath, 'r') as f:
             for line in f:
                 line = line.strip()
@@ -311,15 +318,25 @@ def parse_s2p_file(filepath):
                     freqs.append(float(parts[0]))
                     s11_re.append(float(parts[1]))
                     s11_im.append(float(parts[2]))
-                    s21_re.append(float(parts[5]))
-                    s21_im.append(float(parts[6]))
-        
+                    s21col_re.append(float(parts[3]))
+                    s21col_im.append(float(parts[4]))
+                    s12col_re.append(float(parts[5]))
+                    s12col_im.append(float(parts[6]))
+
         if len(freqs) != N_FREQ_POINTS:
             return None, None, None
-        
+
         freqs = np.array(freqs)
         s11_complex = np.array(s11_re) + 1j * np.array(s11_im)
-        s21_complex = np.array(s21_re) + 1j * np.array(s21_im)
+        s21_from_s21 = np.array(s21col_re) + 1j * np.array(s21col_im)
+        s21_from_s12 = np.array(s12col_re) + 1j * np.array(s12col_im)
+
+        # pick the transmission column pair that actually carries data; a blank
+        # pair sums to ~0. compare total magnitude and take the populated one
+        if np.abs(s21_from_s21).sum() >= np.abs(s21_from_s12).sum():
+            s21_complex = s21_from_s21
+        else:
+            s21_complex = s21_from_s12
         return freqs, s11_complex, s21_complex
     except (IOError, ValueError):
         return None, None, None
