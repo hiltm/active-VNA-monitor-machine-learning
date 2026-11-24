@@ -249,13 +249,20 @@ def day_to_class(day_number):
 
 
 def parse_timestamp_from_filename(filename):
-    """extract datetime from filename like 'measurement_YYYYMMDD_HHMMSS_testdata.s2p'."""
+    """extract datetime from filename like 'measurement_YYYYMMDD_HHMMSS[_testdata].s2p'
+
+    handles both the older '..._HHMMSS_testdata.s2p' form and the newer
+    '..._HHMMSS.s2p' form (no suffix), where the time field carries the '.s2p'
+    extension. splits off anything after the 6-digit time before parsing
+    """
     basename = os.path.basename(filename)
     parts = basename.split('_')
     if len(parts) >= 3:
         try:
             date_str = parts[1]
-            time_str = parts[2]
+            # time field may be 'HHMMSS', 'HHMMSS.s2p', or 'HHMMSS.whatever';
+            # keep only the leading digits so both filename forms parse
+            time_str = parts[2].split('.')[0]
             return datetime.strptime(f"{date_str}_{time_str}", "%Y%m%d_%H%M%S")
         except (ValueError, IndexError):
             return None
