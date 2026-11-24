@@ -15,7 +15,7 @@ Tasks evaluated: 3class and heavy_vs_rest (the two most informative).
 Writes results/task6_extended.json. Reuses the per-DUT feature cache; no
 .s2p re-parsing.
 """
-import os, sys, json, time
+import os, sys, json, time, gc
 import numpy as np
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -69,30 +69,50 @@ def metrics(y_true, y_pred, labels):
 
 
 def main():
-    out = {}
-    cache = {}
-    for dut in ALL_DUTS:
-        Xr, y = load_baseline_relative(dut)
-        cache[dut] = (Xr, y)
-        print(f"Loaded {dut}: {Xr.shape}")
+    out = {t: {} for t in TASKS}
+    out['_meta'] = {'pca_prefit': dc.pca_prefit_k()}   # provenance for this run
 
-    for task_name, (relabel, labels) in TASKS.items():
-        out[task_name] = {}
-        for train_duts, test_dut in FOLDS:
-            fold_key = f"test_{test_dut}"
+    # load per fold (fold-outer, task-inner) rather than preloading all 8 boards,
+    # which OOM-killed the run. only the current fold's data is resident; the
+    # standardize + PCA are computed once per fold and shared across tasks.
+    for train_duts, test_dut in FOLDS:
+        fold_key = f"test_{test_dut}"
+        print(f"\n=== fold: test={test_dut}  (loading {len(train_duts)} train boards) ===")
+        train_feats, train_labels = [], []
+        for d in train_duts:
+            Xd, yd = load_baseline_relative(d)
+            train_feats.append(Xd)
+            train_labels.append(yd)
+        Xtr = np.vstack(train_feats)
+        ytr_raw = np.concatenate(train_labels)
+        del train_feats, train_labels
+        Xte, yte_raw = load_baseline_relative(test_dut)
+
+        # memory-bounded standardization (see data_cache.standardize_chunked)
+        Xtr_s, Xte_s = dc.standardize_chunked(Xtr, Xte)
+        del Xtr, Xte
+        # optional PCA pre-reduction (CHIPTAMPER_PCA_PREFIT) for small-RAM runs;
+        # no-op by default. when set, the full-dim PLS and the inner PCA below
+        # operate on the pre-reduced matrix (preview only)
+        Xtr_s, Xte_s, pca_info = dc.maybe_pca_prefit(Xtr_s, Xte_s)
+        if pca_info['pca_prefit']:
+            print(f"    [pca-prefit k={pca_info['pca_prefit']} "
+                  f"evr={pca_info['pca_prefit_evr']:.3f}]")
+
+        # PCA is unsupervised (label-independent), so fit it once per fold and
+        # reuse the reduced features across both tasks.
+        pca_shared = PCA(n_components=PCA_K, whiten=True, random_state=RNG).fit(Xtr_s)
+        Ztr_shared, Zte_shared = pca_shared.transform(Xtr_s), pca_shared.transform(Xte_s)
+        evr_shared = float(pca_shared.explained_variance_ratio_.sum())
+
+        for task_name, (relabel, labels) in TASKS.items():
             out[task_name][fold_key] = {}
-            Xtr = np.vstack([cache[d][0] for d in train_duts])
-            ytr = relabel(np.concatenate([cache[d][1] for d in train_duts]))
-            Xte, yte = cache[test_dut][0], relabel(cache[test_dut][1])
+            ytr = relabel(ytr_raw)
+            yte = relabel(yte_raw)
 
-            scaler = StandardScaler().fit(Xtr)
-            Xtr_s, Xte_s = scaler.transform(Xtr), scaler.transform(Xte)
-
-            # --- PCA -> RF and PCA -> LinearSVC ---
-            # Whiten so downstream kernel/NN models see unit-scale components.
-            pca = PCA(n_components=PCA_K, whiten=True, random_state=RNG).fit(Xtr_s)
-            Ztr, Zte = pca.transform(Xtr_s), pca.transform(Xte_s)
-            evr = float(pca.explained_variance_ratio_.sum())
+            # reuse the shared PCA projection
+            Ztr, Zte = Ztr_shared, Zte_shared
+            evr = evr_shared
             t0 = time.time()
             rf = RandomForestClassifier(n_estimators=200, min_samples_split=5,
                                         min_samples_leaf=2, random_state=RNG, n_jobs=4)
@@ -170,6 +190,10 @@ def main():
             print(f"[{task_name}/{test_dut}] done: "
                   + ", ".join(f"{k}={v['balanced_accuracy']:.3f}"
                               for k, v in out[task_name][fold_key].items()))
+
+        # release this fold's large arrays before loading the next fold
+        del Xtr_s, Xte_s, Ztr_shared, Zte_shared
+        gc.collect()
 
     print(f"\nWrote {OUT}")
 

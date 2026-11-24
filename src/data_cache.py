@@ -152,6 +152,64 @@ def load_hours(dut):
     return data['hours']
 
 
+def pca_prefit_k():
+    """components for optional PCA pre-reduction, from CHIPTAMPER_PCA_PREFIT
+
+    returns an int k if the env var is set (e.g. 50), else None. when set, tasks
+    reduce the standardized features to k PCA components before the full-dim
+    models. this is a memory-relief toggle for small-RAM machines; leaving it
+    unset runs the full 1612-dim pipeline unchanged (the publication path)
+    """
+    v = os.environ.get('CHIPTAMPER_PCA_PREFIT', '').strip()
+    if not v:
+        return None
+    try:
+        k = int(v)
+        return k if k > 0 else None
+    except ValueError:
+        return None
+
+
+def maybe_pca_prefit(Xtr_s, Xte_s, random_state=42):
+    """optionally PCA-reduce (train-fit) standardized features; no-op if unset
+
+    returns (Xtr_r, Xte_r, info) where info records whether reduction happened
+    and the retained explained-variance ratio (for logging/provenance)
+    """
+    k = pca_prefit_k()
+    if k is None:
+        return Xtr_s, Xte_s, {'pca_prefit': None}
+    from sklearn.decomposition import PCA
+    k = min(k, Xtr_s.shape[1])
+    pca = PCA(n_components=k, svd_solver='randomized',
+              random_state=random_state).fit(Xtr_s)
+    evr = float(pca.explained_variance_ratio_.sum())
+    return (pca.transform(Xtr_s).astype(np.float32),
+            pca.transform(Xte_s).astype(np.float32),
+            {'pca_prefit': k, 'pca_prefit_evr': evr})
+
+
+def standardize_chunked(Xtr, Xte, chunk=50000):
+    """zero-mean/unit-var standardize, memory-bounded for very large matrices
+
+    sklearn's StandardScaler.fit upcasts the whole input to float64 internally,
+    which on the 8-DUT training matrix (~1.1M x 1612) spikes peak RSS ~11 GB and
+    OOM-kills the process. this fits mean/std with chunked partial_fit (no full
+    float64 copy) and transforms in place in float32. returns (Xtr_s, Xte_s)
+    """
+    from sklearn.preprocessing import StandardScaler
+    sc = StandardScaler()
+    for i in range(0, Xtr.shape[0], chunk):
+        sc.partial_fit(Xtr[i:i + chunk])
+    mean = sc.mean_.astype(np.float32)
+    scale = sc.scale_.astype(np.float32)
+    # transform in place, chunked, staying float32
+    for i in range(0, Xtr.shape[0], chunk):
+        Xtr[i:i + chunk] = (Xtr[i:i + chunk] - mean) / scale
+    Xte = (Xte - mean) / scale
+    return Xtr, Xte
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build per-DUT feature cache.")
     ap.add_argument('--rebuild', action='store_true', help='Force re-extraction')

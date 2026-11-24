@@ -25,7 +25,7 @@ Writes results/task9_trajectory.json. Aging hours are derived from the .s2p
 filename timestamps via train_classifier's discovery + parser; features come
 from the per-DUT cache (no re-parsing of S-parameters).
 """
-import os, sys, json, time, glob
+import os, sys, json, time, glob, gc
 from datetime import datetime
 import numpy as np
 
@@ -73,42 +73,59 @@ def regress_metrics(y_true, y_pred):
     }
 
 
+def load_fold_features(dut):
+    """baseline-relative float32 features for one DUT, NaN-hours rows dropped,
+    row-aligned with load_hours/labels after the same mask. loaded on demand so
+    all 8 boards are never resident at once (that preload OOM-killed the run)"""
+    X, y, _ = dc.load_dut(dut)
+    baseline = X[y == 0].mean(axis=0, dtype=np.float64).astype(np.float32)
+    X = (X - baseline).astype(np.float32)
+    h = aging_hours_for_dut(dut)
+    if h.shape[0] != X.shape[0]:
+        raise RuntimeError(f"{dut}: hours {h.shape[0]} != features {X.shape[0]} "
+                           f"(cache alignment)")
+    ok = ~np.isnan(h)
+    return X[ok], y[ok]
+
+
 def main():
-    # Load features (baseline-relative) and aging hours, aligned per DUT.
-    feats, hrs, cls = {}, {}, {}
-    maxhours = {}
+    # lightweight precompute: per-board hours, labels, and max-hours only
+    # (small; the big feature matrices are loaded per fold in the loop below).
+    hrs, cls, maxhours = {}, {}, {}
     for dut in ALL_DUTS:
-        # keep float32 (cache dtype); float64 preload of all 8 DUTs OOM-killed the run
-        X, y, day = dc.load_dut(dut)
-        baseline = X[y == 0].mean(axis=0, dtype=np.float64).astype(np.float32)
-        X = (X - baseline).astype(np.float32)   # baseline-relative
         h = aging_hours_for_dut(dut)
-        if h.shape[0] != X.shape[0]:
-            raise RuntimeError(f"{dut}: hours {h.shape[0]} != features {X.shape[0]} "
-                               f"(discovery/cache order mismatch)")
-        # guard against NaN hours
+        _, y, day = dc.load_dut(dut)
         ok = ~np.isnan(h)
-        feats[dut], hrs[dut], cls[dut] = X[ok], h[ok], y[ok]
+        hrs[dut], cls[dut] = h[ok], y[ok]
         maxhours[dut] = float(np.nanmax(h))
-        print(f"{dut}: n={ok.sum()} aging span={maxhours[dut]:.1f} h "
+        print(f"{dut}: n={int(ok.sum())} aging span={maxhours[dut]:.1f} h "
               f"(day max={day.max()})")
 
-    out = {'per_dut_max_hours': maxhours, 'folds': {}}
+    out = {'per_dut_max_hours': maxhours, 'pca_prefit': dc.pca_prefit_k(), 'folds': {}}
 
     for train_duts, test_dut in FOLDS:
         fold_key = f"test_{test_dut}"
         out['folds'][fold_key] = {}
-        Xtr = np.vstack([feats[d] for d in train_duts])
-        Xte = feats[test_dut]
+        print(f"\n=== fold: test={test_dut}  (loading {len(train_duts)} train boards) ===")
+
+        # load only this fold's feature matrices
+        Xtr = np.vstack([load_fold_features(d)[0] for d in train_duts])
+        Xte, _ = load_fold_features(test_dut)
         htr = np.concatenate([hrs[d] for d in train_duts])
         hte = hrs[test_dut]
         # normalized index per board
         utr = np.concatenate([hrs[d] / maxhours[d] for d in train_duts])
         ute = hrs[test_dut] / maxhours[test_dut]
 
-        scaler = StandardScaler().fit(Xtr)
-        Xtr_s, Xte_s = scaler.transform(Xtr), scaler.transform(Xte)
-        pca = PCA(PCA_K, whiten=True, svd_solver='randomized',
+        # memory-bounded standardization (see data_cache.standardize_chunked)
+        Xtr_s, Xte_s = dc.standardize_chunked(Xtr, Xte)
+        del Xtr, Xte
+        # optional PCA pre-reduction (CHIPTAMPER_PCA_PREFIT); no-op by default
+        Xtr_s, Xte_s, pca_info = dc.maybe_pca_prefit(Xtr_s, Xte_s)
+        if pca_info['pca_prefit']:
+            print(f"    [pca-prefit k={pca_info['pca_prefit']} "
+                  f"evr={pca_info['pca_prefit_evr']:.3f}]")
+        pca = PCA(min(PCA_K, Xtr_s.shape[1]), whiten=True, svd_solver='randomized',
                   random_state=RNG).fit(Xtr_s)
         Ztr, Zte = pca.transform(Xtr_s), pca.transform(Xte_s)
 
@@ -167,6 +184,10 @@ def main():
             print(f"[{test_dut}/{target_name}] ridge MAE={res['ridge']['mae']:.2f}{tag} "
                   f"hgb MAE={res['hgb']['mae']:.2f}{tag} "
                   f"gp MAE={res['approx_gp']['mae']:.2f}{tag}", flush=True)
+
+        # release this fold's large arrays before loading the next fold
+        del Xtr_s, Xte_s, Ztr, Zte
+        gc.collect()
 
     print(f"\nWrote {OUT}")
 
